@@ -265,7 +265,88 @@ std::optional<std::string> getEnvironmentVariable(const std::string& varName)
     return val != nullptr ? std::string(val) : std::optional<std::string>{};
 }
 
-#include "simple_exec.h"
+// reinterpreted from https://github.com/wheybags/simple_exec/blob/5a74c507c4ce1b2bb166177ead4cca7cfa23cb35/simple_exec.h
+#include <fcntl.h>
+#include <sys/wait.h>
+
+static bool runCommandArray(const char* const* args, std::string& stdOut, int& returnCode)
+{
+#define runCommandArray_ASSERT(COND) FALCOR_CHECK((COND), "")
+#define runCommandArray_CHILD_ASSERT(COND) \
+    if (!(COND))                           \
+    {                                      \
+        std::abort();                      \
+    }
+#define runCommandArray_WRITE_FD 1
+#define runCommandArray_READ_FD 0
+
+    int pipeParentToChild[2], pipeChildToParent[2], pipeError[2];
+    runCommandArray_ASSERT(pipe(pipeParentToChild) == 0);
+    runCommandArray_ASSERT(pipe(pipeChildToParent) == 0);
+    runCommandArray_ASSERT(pipe(pipeError) == 0);
+
+    pid_t pid = fork();
+    runCommandArray_ASSERT(pid != -1);
+
+    if (pid == 0)
+    {
+        // child close unused pipe fd
+        runCommandArray_CHILD_ASSERT(close(pipeParentToChild[runCommandArray_WRITE_FD]) == 0);
+        runCommandArray_CHILD_ASSERT(close(pipeChildToParent[runCommandArray_READ_FD]) == 0);
+        runCommandArray_CHILD_ASSERT(close(pipeError[runCommandArray_READ_FD]) == 0);
+
+        // set child fd's
+        runCommandArray_CHILD_ASSERT(dup2(pipeParentToChild[runCommandArray_READ_FD], STDIN_FILENO) != -1);
+        runCommandArray_CHILD_ASSERT(dup2(pipeChildToParent[runCommandArray_WRITE_FD], STDOUT_FILENO) != -1);
+        runCommandArray_CHILD_ASSERT(dup2(open("/dev/null", O_WRONLY), STDERR_FILENO) != -1);
+
+        // run command
+        execvp(args[0], (char**)args);
+
+        // if execvp succeed, this is unreachable
+        char err = 1;
+        runCommandArray_CHILD_ASSERT(write(pipeError[runCommandArray_WRITE_FD], &err, 1) != -1);
+        close(pipeError[runCommandArray_WRITE_FD]);
+        close(pipeParentToChild[runCommandArray_READ_FD]);
+        close(pipeChildToParent[runCommandArray_WRITE_FD]);
+        exit(0);
+    }
+
+    // parent close unused pipe fd
+    runCommandArray_ASSERT(close(pipeParentToChild[runCommandArray_READ_FD]) == 0);
+    runCommandArray_ASSERT(close(pipeChildToParent[runCommandArray_WRITE_FD]) == 0);
+    runCommandArray_ASSERT(close(pipeError[runCommandArray_WRITE_FD]) == 0);
+
+    std::array<char, 256> buffer{};
+
+    while (true)
+    {
+        ssize_t bytesRead = read(pipeChildToParent[runCommandArray_READ_FD], buffer.data(), buffer.size());
+        runCommandArray_ASSERT(bytesRead != -1);
+        if (bytesRead > 0)
+        {
+            stdOut += std::string(buffer.data(), bytesRead);
+            continue;
+        }
+
+        runCommandArray_ASSERT(waitpid(pid, &returnCode, 0) == pid);
+
+        // done with these now
+        runCommandArray_ASSERT(close(pipeParentToChild[runCommandArray_WRITE_FD]) == 0);
+        runCommandArray_ASSERT(close(pipeChildToParent[runCommandArray_READ_FD]) == 0);
+
+        char errChar = 0;
+        runCommandArray_ASSERT(read(pipeError[runCommandArray_READ_FD], &errChar, 1) != -1);
+        close(pipeError[runCommandArray_READ_FD]);
+        // errChar == 1 means execvp fails in child
+        return errChar == 0;
+    }
+
+#undef runCommandArray_ASSERT
+#undef runCommandArray_CHILD_ASSERT
+#undef runCommandArray_WRITE_FD
+#undef runCommandArray_READ_FD
+}
 
 template<bool bOpen>
 bool fileDialogCommon(const FileDialogFilterVec& filters, std::filesystem::path& path)
@@ -290,27 +371,20 @@ bool fileDialogCommon(const FileDialogFilterVec& filters, std::filesystem::path&
         args.push_back(fmt::format("--file-filter={} (*.{})|*.{}", filter.desc, filter.ext, filter.ext));
     args.emplace_back("--file-filter=All files (*)|*");
 
-    int byteCount = 0;
+    std::string stdOut;
     int exitCode = 0;
-    char* stdOut = nullptr;
     std::vector<const char*> cstrArgs(args.size() + 1);
     for (size_t i = 0; i < args.size(); ++i)
         cstrArgs[i] = args[i].c_str();
     cstrArgs[args.size()] = nullptr;
-    int processInvokeError = runCommandArray(&stdOut, &byteCount, &exitCode, 0, cstrArgs.data());
-
-    if (processInvokeError == COMMAND_NOT_FOUND)
+    if (runCommandArray(cstrArgs.data(), stdOut, exitCode) == false)
     {
-        FALCOR_THROW("Zenith not installed");
+        FALCOR_THROW("Failed to run Zenity");
         return false;
     }
-    if (exitCode == 1 || stdOut == nullptr)
+    if (exitCode != 0 || stdOut.size() < 2 || stdOut.back() != '\n')
         return false;
-
-    std::size_t len = strlen(stdOut);
-    stdOut[len - 1] = '\0'; // trim out the final \n with a null terminator
-    path = stdOut;
-
+    path = std::filesystem::path(stdOut.begin(), stdOut.end() - 1); // trim out the last '\n'
     return true;
 }
 
