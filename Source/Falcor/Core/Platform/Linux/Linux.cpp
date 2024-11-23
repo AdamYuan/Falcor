@@ -265,11 +265,7 @@ std::optional<std::string> getEnvironmentVariable(const std::string& varName)
     return val != nullptr ? std::string(val) : std::optional<std::string>{};
 }
 
-namespace
-{
-#define SIMPLE_EXEC_IMPLEMENTATION
 #include "simple_exec.h"
-} // namespace
 
 template<bool bOpen>
 bool fileDialogCommon(const FileDialogFilterVec& filters, std::filesystem::path& path)

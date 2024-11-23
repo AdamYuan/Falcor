@@ -1,22 +1,9 @@
 // copied from: https://github.com/wheybags/simple_exec/blob/5a74c507c4ce1b2bb166177ead4cca7cfa23cb35/simple_exec.h
 
 // simple_exec.h, single header library to run external programs + retrieve their status code and output (unix only for now)
-//
-// do this:
-// #define SIMPLE_EXEC_IMPLEMENTATION
-//   before you include this file in *one* C or C++ file to create the implementation.
-// i.e. it should look like this:
-// #define SIMPLE_EXEC_IMPLEMENTATION
-// #include "simple_exec.h"
 
 #ifndef SIMPLE_EXEC_H
 #define SIMPLE_EXEC_H
-
-int runCommandArray(char** stdOut, int* stdOutByteCount, int* returnCode, int includeStdErr, const char* const* allArgs);
-
-#endif // SIMPLE_EXEC_H
-
-#ifdef SIMPLE_EXEC_IMPLEMENTATION
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +34,7 @@ enum RUN_COMMAND_ERROR
     COMMAND_NOT_FOUND = 1
 };
 
-int runCommandArray(char** stdOut, int* stdOutByteCount, int* returnCode, int includeStdErr, const char* const* allArgs)
+static int runCommandArray(char** stdOut, int* stdOutByteCount, int* returnCode, int includeStdErr, const char* const* allArgs)
 {
     // adapted from: https://stackoverflow.com/a/479103
 
@@ -183,4 +170,6 @@ int runCommandArray(char** stdOut, int* stdOutByteCount, int* returnCode, int in
     }
 }
 
-#endif // SIMPLE_EXEC_IMPLEMENTATION
+#undef release_assert
+
+#endif // SIMPLE_EXEC_H
