@@ -265,74 +265,57 @@ std::optional<std::string> getEnvironmentVariable(const std::string& varName)
     return val != nullptr ? std::string(val) : std::optional<std::string>{};
 }
 
+namespace
+{
+#define SIMPLE_EXEC_IMPLEMENTATION
+#include "simple_exec.h"
+} // namespace
+
 template<bool bOpen>
 bool fileDialogCommon(const FileDialogFilterVec& filters, std::filesystem::path& path)
 {
-    if (!gtk_init_check(0, nullptr))
-        FALCOR_THROW("Failed to initialize GTK.");
+    std::vector<std::string> args;
 
-    GtkWidget* pParent = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    GtkWidget* pDialog = nullptr;
-    gint result = 0;
+    args.emplace_back("zenity");
 
-    bool success = false;
     if (bOpen)
     {
-        pDialog = gtk_file_chooser_dialog_new(
-            "Open File",                  // title
-            GTK_WINDOW(pParent),          // parent
-            GTK_FILE_CHOOSER_ACTION_OPEN, // action
-            "_Cancel",                    // button text
-            GTK_RESPONSE_CANCEL,          // button response id
-            "_Open",                      // button text
-            GTK_RESPONSE_ACCEPT,          // button response id
-            NULL                          // end of buttons
-        );
-
-        result = gtk_dialog_run(GTK_DIALOG(pDialog));
-        if (result == GTK_RESPONSE_ACCEPT)
-        {
-            gchar* gtkFilename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(pDialog));
-            path = static_cast<const char*>(gtkFilename);
-            g_free(gtkFilename);
-            success = true;
-        }
+        args.emplace_back("--file-selection");
+        args.emplace_back("--title=Open File");
     }
     else
     {
-        pDialog = gtk_file_chooser_dialog_new(
-            "Save File",                  // title
-            GTK_WINDOW(pParent),          // parent
-            GTK_FILE_CHOOSER_ACTION_SAVE, // action
-            "_Cancel",                    // button text
-            GTK_RESPONSE_CANCEL,          // button response id
-            "_Save",                      // button text
-            GTK_RESPONSE_ACCEPT,          // button response id
-            NULL                          // end of buttons
-        );
-
-        GtkFileChooser* pAsChooser = GTK_FILE_CHOOSER(pDialog);
-
-        gtk_file_chooser_set_do_overwrite_confirmation(pAsChooser, TRUE);
-        gtk_file_chooser_set_current_name(pAsChooser, "");
-
-        result = gtk_dialog_run(GTK_DIALOG(pDialog));
-        if (result == GTK_RESPONSE_ACCEPT)
-        {
-            char* gtkFilename = gtk_file_chooser_get_filename(pAsChooser);
-            path = std::filesystem::path(gtkFilename);
-            g_free(gtkFilename);
-            success = true;
-        }
+        args.emplace_back("--file-selection");
+        args.emplace_back("--title=Save File");
+        args.emplace_back("--save");
     }
 
-    gtk_widget_destroy(pDialog);
-    gtk_widget_destroy(pParent);
-    while (gtk_events_pending())
+    for (const auto& filter : filters)
+        args.push_back(fmt::format("--file-filter={} (*.{})|*.{}", filter.desc, filter.ext, filter.ext));
+    args.emplace_back("--file-filter=All files (*)|*");
+
+    int byteCount = 0;
+    int exitCode = 0;
+    char* stdOut = nullptr;
+    std::vector<const char*> cstrArgs(args.size() + 1);
+    for (size_t i = 0; i < args.size(); ++i)
+        cstrArgs[i] = args[i].c_str();
+    cstrArgs[args.size()] = nullptr;
+    int processInvokeError = runCommandArray(&stdOut, &byteCount, &exitCode, 0, cstrArgs.data());
+
+    if (processInvokeError == COMMAND_NOT_FOUND)
     {
-        gtk_main_iteration();
+        FALCOR_THROW("Zenith not installed");
+        return false;
     }
-    return success;
+    if (exitCode == 1 || stdOut == nullptr)
+        return false;
+
+    std::size_t len = strlen(stdOut);
+    stdOut[len - 1] = '\0'; // trim out the final \n with a null terminator
+    path = stdOut;
+
+    return true;
 }
 
 bool openFileDialog(const FileDialogFilterVec& filters, std::filesystem::path& path)
