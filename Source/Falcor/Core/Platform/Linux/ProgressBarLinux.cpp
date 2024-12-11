@@ -43,13 +43,14 @@ struct ProgressBar::Window
     Window(const std::string& msg)
     {
         running = true;
-        thread = std::thread(threadFunc, this, msg);
+        logInfo("{}", msg);
+        // thread = std::thread(threadFunc, this, msg);
     }
 
     ~Window()
     {
         running = false;
-        thread.join();
+        // thread.join();
     }
 
     static void threadFunc(ProgressBar::Window* pThis, std::string msg)
