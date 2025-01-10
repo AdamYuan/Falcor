@@ -31,3 +31,6 @@
 *.tlog
 *.bak
 *.swp
+
+/cmake-build-debug/
+/cmake-build-release/

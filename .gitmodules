@@ -16,3 +16,6 @@
 [submodule "external/vulkan-headers"]
 	path = external/vulkan-headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "Source/GaussianGI"]
+	path = Source/GaussianGI
+	url = git@github.com:AdamYuan/GaussianGI-Falcor.git
